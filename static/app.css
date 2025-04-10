@@ -1,0 +1,14 @@
+.table {
+    border-collapse: collapse; /* Colapsa as bordas adjacentes */
+    width: 100%; /* Ocupa toda a largura do container */
+}
+
+.table th, .table td {
+    border: 1px solid black; /* Adiciona borda de 1px sólida preta nas células */
+    padding: 8px; /* Adiciona um espaçamento interno para melhor visualização */
+    text-align: left; /* Alinha o texto à esquerda por padrão */
+}
+
+.thead-default th {
+    background-color: #f2f2f2; /* Cor de fundo para o cabeçalho (opcional) */
+}
