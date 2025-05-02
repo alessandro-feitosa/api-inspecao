@@ -1,13 +1,13 @@
 import logging
-from main import app, db, mail
+from main import app, db, mail, token_auth
 from flask import request, jsonify
-from models import Inspecao, Maquina, Empresa, Operador
+from models import Inspecao, Maquinas, Empresas, Usuarios, Defeitos
 from datetime import datetime
 from flask_mail import Message
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
 from reportlab.lib.enums import TA_CENTER,TA_LEFT
 from reportlab.lib import colors
 from io import BytesIO
@@ -16,6 +16,7 @@ from io import BytesIO
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 @app.route('/maquina/inspecao', methods=['POST'])
+@token_auth.login_required
 def criar_inspecao():
     logging.info('Iniciando a criação de uma nova Inspecao.')
     try:
@@ -35,7 +36,7 @@ def criar_inspecao():
         nova_inspecao = Inspecao(
             id = data['id'],
             maquinaId = data['maquinaId'],
-            operadorId = data['operadorId'],
+            usuarioId = data['usuarioId'],
             dataInspecao = data_inspecao_obj,
             horasDeOperacao = data['horasDeOperacao'],
             horasEmCarga = data['horasEmCarga'],
@@ -48,30 +49,46 @@ def criar_inspecao():
             pressaoSeparadorArOleo = data['pressaoSeparadorArOleo'],
             pressaoSaidaCompressor = data['pressaoSaidaCompressor'],
             temperaturaPontoOrvalho = data['temperaturaPontoOrvalho'],
-            dreno = True if data['dreno'] == 'true' else False,
-            limpeza = True if data['limpeza'] == 'true' else False,
-            status = data['status'],
-            desvioAnomalia = data['desvioAnomalia'],
-            causaAnomalia = data['causaAnomalia'],
-            acaoCorretiva = data['acaoCorretiva'],
-            responsavel = data['responsavel']
+            dreno = data.get('dreno'),
+            limpeza = data.get('limpeza')
         )
+        logging.info(f'Dados da Nova Inspeçao: {nova_inspecao}')
+        defeitos = data.get('defeito')
+        if defeitos:
+            logging.info(f'Defeitos encontrados para a Inspeçao da Maquina {nova_inspecao.maquinaId} do dia {nova_inspecao.dataInspecao}')
+            logging.info(f'Defeitos: {defeitos}')
+            for defeito in defeitos:
+                novo_defeito = Defeitos(
+                    id = defeito.get('id'),
+                    inspecaoId = nova_inspecao.id,
+                    status = defeito.get('status'),
+                    desvioAnomalia = defeito.get('desvioAnomalia'),
+                    causaAnomalia = defeito.get('causaAnomalia'),
+                    acaoCorretiva = defeito.get('acaoCorretiva'),
+                    responsavel = defeito.get('responsavel'),
+                    sincronizado = False if defeito.get('sincronizado') == None else True
+                )
+                db.session.add(novo_defeito)
+        else:
+            logging.info(f'Nenhum defeito foi reportado para a Inspeçao da Maquina {nova_inspecao.maquinaId} do dia {nova_inspecao.dataInspecao}')
+
         logging.info(f'Dados da Nova Inspecao: {nova_inspecao}')
         db.session.add(nova_inspecao)
         db.session.commit()
         logging.info(f'Inspecao criada com sucesso. ID: {nova_inspecao.id}')
 
-        ## Encontra a Maquina pelo maquinaId. E acha a Empresa pela Maquina.
-        maquina = Maquina.query.filter_by(id=nova_inspecao.maquinaId).first()
-        operador = Operador.query.filter_by(id=nova_inspecao.operadorId).first()
-        empresa = Empresa.query.filter_by(id=maquina.empresaId).first()
+        # ## Encontra a Maquina pelo maquinaId. E acha a Empresa pela Maquina.
+        maquina = Maquinas.query.filter_by(id=nova_inspecao.maquinaId).first()
+        usuario = Usuarios.query.filter_by(id=nova_inspecao.usuarioId).first()
+        empresa = Empresas.query.filter_by(id=maquina.empresaId).first()
 
         if empresa:
+            logging.info('Preparando dados para montar o email da inspeçao')
             titulo_email = f'Nova Inspecao Cadastrada - Maquina {maquina.modelo} - Serie {maquina.numero_serie} - Dia {nova_inspecao.dataInspecao.strftime('%d/%m/%Y')}'
             titulo_pdf = f'Inspecao_Maquina_{maquina.numero_serie}_{nova_inspecao.dataInspecao.strftime('%d_%m_%Y')}'
 
-            pdf_buffer = criar_pdf_inspecao(nova_inspecao, maquina, operador.nome)
-            enviou = enviar_email_inspecao(empresa.email, empresa.nomefantasia, pdf_buffer, titulo_email, titulo_pdf)
+            pdf_buffer = criar_pdf_inspecao(nova_inspecao, maquina, usuario.nome)
+            enviou = enviar_email_inspecao(empresa.email, empresa.nome_fantasia, pdf_buffer, titulo_email, titulo_pdf)
 
             if enviou:
                 logging.info(f'Email com PDF enviado com sucesso para {empresa.email}')
@@ -83,20 +100,36 @@ def criar_inspecao():
         return jsonify({'mensagem':'Inspecao criada com sucesso!'}), 201
     
     except Exception as e:
-        logging.error(f'Erro ao criar maquina: {e}')
+        logging.error(f'Erro ao criar Inspecao: {e}')
         db.session.rollback()
-        return jsonify({'mensagem':f'Erro ao criar maquina: {e}'}), 500
+        return jsonify({'mensagem':f'Erro ao criar Inspecao: {e}'}), 500
 
 
 @app.route('/maquina/inspecao/<id>', methods=['GET'])
+@token_auth.login_required
 def consulta_inspecao(id):
     logging.info(f'Iniciando consulta da Maquina ID: {id}.')
     inspecao = Inspecao.query.get(id)
     if inspecao:
+        defeitos = Defeitos.query.filter_by(inspecaoId=id)
+        listaDefeitos = []
+        if defeitos:
+            for defeito in defeitos:
+                listaDefeitos.append({
+                    'id': defeito.id,
+                    'status': defeito.status,
+                    'desvioAnomalia': defeito.desvioAnomalia,
+                    'causaAnomalia': defeito.causaAnomalia,
+                    'acaoCorretiva': defeito.acaoCorretiva,
+                    'responsavel': defeito.responsavel
+                })
+        else:
+            logging.info(f'Nao existem defeitos para essa inspecao')
+
         return jsonify({
             "id": inspecao.id,
             "maquinaId": inspecao.maquinaId,
-            "operadorId": inspecao.operadorId,
+            "usuarioId": inspecao.usuarioId,
             "dataInspecao": inspecao.dataInspecao.strftime('%d/%m/%Y'),
             "horasDeOperacao": inspecao.horasDeOperacao,
             "horasEmCarga": inspecao.horasEmCarga,
@@ -111,26 +144,38 @@ def consulta_inspecao(id):
             "temperaturaPontoOrvalho": inspecao.temperaturaPontoOrvalho,
             "dreno": inspecao.dreno,
             "limpeza": inspecao.limpeza,
-            "status": inspecao.status,
-            "desvioAnomalia": inspecao.desvioAnomalia,
-            "causaAnomalia": inspecao.causaAnomalia,
-            "acaoCorretiva": inspecao.acaoCorretiva,
-            "responsavel": inspecao.responsavel
+            "observacao": inspecao.observacao,
+            "defeito": listaDefeitos
         }), 200
     return jsonify({'mensagem':'Inspecao não encontrada'}), 404
 
 
-@app.route('/maquina/inspecoes/<id>', methods=['GET'])
+@app.route('/maquina/<id>/inspecoes', methods=['GET'])
 def consulta_maquina_inspecoes(id):
     logging.info(f'Iniciando consulta da Maquina da Empresa ID: {id}.')
     inspecoes = Inspecao.query.filter_by(maquinaId=id)
     resultado = []
     for inspecao in inspecoes:
+        defeitos = Defeitos.query.filter_by(inspecaoId=inspecao.id)
+        listaDefeitos = []
+        if defeitos:
+            for defeito in defeitos:
+                listaDefeitos.append({
+                    'id': defeito.id,
+                    'status': defeito.status,
+                    'desvioAnomalia': defeito.desvioAnomalia,
+                    'causaAnomalia': defeito.causaAnomalia,
+                    'acaoCorretiva': defeito.acaoCorretiva,
+                    'responsavel': defeito.responsavel
+                })
+        else:
+            logging.info(f'Nao existem defeitos para essa inspecao')
+
         resultado.append({
             "id": inspecao.id,
             "maquinaId": inspecao.maquinaId,
-            "operadorId": inspecao.operadorId,
-            "dataInspecao": inspecao.dataInspecao,
+            "usuarioId": inspecao.usuarioId,
+            "dataInspecao": inspecao.dataInspecao.strftime('%d/%m/%Y'),
             "horasDeOperacao": inspecao.horasDeOperacao,
             "horasEmCarga": inspecao.horasEmCarga,
             "temperaturaOleo": inspecao.temperaturaOleo,
@@ -144,11 +189,8 @@ def consulta_maquina_inspecoes(id):
             "temperaturaPontoOrvalho": inspecao.temperaturaPontoOrvalho,
             "dreno": inspecao.dreno,
             "limpeza": inspecao.limpeza,
-            "status": inspecao.status,
-            "desvioAnomalia": inspecao.desvioAnomalia,
-            "causaAnomalia": inspecao.causaAnomalia,
-            "acaoCorretiva": inspecao.acaoCorretiva,
-            "responsavel": inspecao.responsavel
+            "observacao": inspecao.observacao,
+            "defeito": listaDefeitos
         })
     return jsonify(resultado), 200
 
@@ -161,7 +203,7 @@ def atualizar_inspecao(id):
         data = request.get_json()
 
         inspecao.maquinaId = data.get('maquinaId', inspecao.maquinaId)
-        inspecao.operadorId = data.get('operadorId', inspecao.operadorId)
+        inspecao.usuarioId = data.get('usuarioId', inspecao.usuarioId)
         inspecao.dataInspecao = data.get('dataInspecao', inspecao.dataInspecao)
         inspecao.horasDeOperacao = data.get('horasDeOperacao', inspecao.horasDeOperacao)
         inspecao.horasEmCarga = data.get('horasEmCarga', inspecao.horasEmCarga)
@@ -198,8 +240,9 @@ def deletar_inspecao(id):
     return jsonify({'mensagem': 'Inspecao não encontrada!'}), 404
 
 
-def criar_pdf_inspecao(inspecao, maquina, nome_operador):
-    """Cria um PDF formatado com os detalhes da inspeção em tabela."""
+def criar_pdf_inspecao(inspecao, maquina, nome_operador, watermark_text=None):
+    """Cria um PDF formatado com os detalhes da inspeção e defeitos em tabelas."""
+    logging.info('Cria um PDF formatado com os detalhes da inspeção e defeitos em tabelas')
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter)
     styles = getSampleStyleSheet()
@@ -208,9 +251,36 @@ def criar_pdf_inspecao(inspecao, maquina, nome_operador):
         parent=styles['h1'],
         alignment=TA_CENTER
     )
-    logging.info('Iniciando criaçao do PDF')
 
-    data = [
+    watermark_style = ParagraphStyle(
+        name='Watermark',
+        fontSize=120,
+        textColor=colors.grey,
+        alignment=TA_LEFT,
+        rotation=45 # Opcional: rotaciona a marca d'água
+    )
+
+    def add_watermark(canvas, doc, watermark_text=None):
+        if watermark_text:
+            canvas.saveState()
+            canvas.setFillColor(colors.grey, alpha=0.7) # Defina o valor de alpha aqui (ex: 0.3 para transparente)
+            canvas.setFont(watermark_style.fontName, watermark_style.fontSize)
+            text_width = canvas.stringWidth(watermark_text, watermark_style.fontName, watermark_style.fontSize)
+            text_height = watermark_style.fontSize
+            x = (doc.width + doc.leftMargin) / 2.0
+            y = (doc.height + doc.bottomMargin) / 2.0
+            canvas.translate(x, y)
+            canvas.rotate(watermark_style.rotation)
+            canvas.drawCentredString(0, 0, watermark_text)
+            canvas.restoreState()
+
+    elements = []
+    elements.append(Paragraph(f"Detalhes da Inspeção - Dia {inspecao.dataInspecao.strftime('%d/%m/%Y')}", title_style))
+    elements.append(Spacer(1, 12))
+    logging.info('Preenchendo dados da Tabela Inspeçao')
+    # Tabela de Detalhes da Inspeção
+    data_inspecao = [
+        ["Campo", "Valor"],
         ["Inspeçao", inspecao.id],
         ["Modelo Máquina", maquina.modelo],
         ["Número de Série", maquina.numero_serie],
@@ -229,32 +299,73 @@ def criar_pdf_inspecao(inspecao, maquina, nome_operador):
         ["Temperatura Ponto Orvalho", inspecao.temperaturaPontoOrvalho],
         ["Dreno", "Sim" if inspecao.dreno else "Não"],
         ["Limpeza", "Sim" if inspecao.limpeza else "Não"],
-        ["Status", inspecao.status],
-        ["Desvio/Anomalia", inspecao.desvioAnomalia],
-        ["Causa Anomalia", inspecao.causaAnomalia],
-        ["Ação Corretiva", inspecao.acaoCorretiva],
-        ["Responsável", inspecao.responsavel]
+        ["Observaçao", inspecao.observacao if inspecao.observacao else "Nenhuma"]
     ]
-
-    table = Table(data)
-    table.setStyle(TableStyle([
+    table_inspecao = Table(data_inspecao)
+    table_inspecao.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
         ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
         ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('ALIGN', (0, 1), (0, -1), 'LEFT'),
+        ('ALIGN', (1, 1), (1, -1), 'LEFT'),
     ]))
-
-    elements = []
-    elements.append(Paragraph(f"Detalhes da Inspeção - Dia {inspecao.dataInspecao.strftime('%d/%m/%Y')}", title_style))
+    elements.append(table_inspecao)
     elements.append(Spacer(1, 12))
-    elements.append(table)
+    
+    defeitos = Defeitos.query.filter_by(inspecaoId=inspecao.id)
+    # Tabela de Defeitos (se houver)
+    if defeitos:
+        logging.info(f'Preenchendo dados da Tabela Defeitos: {defeitos}')
+        elements.append(Paragraph("Defeitos Encontrados:", styles['h2']))
+        elements.append(Spacer(1, 5))
+        data_defeitos = [
+            ["Status", "Desvio/Anomalia", "Causa", "Ação Corretiva", "Responsável"]
+        ]
+        for defeito in defeitos:
+            
+            data_defeitos.append([
+                defeito.status,
+                defeito.desvioAnomalia,
+                defeito.causaAnomalia,
+                defeito.acaoCorretiva,
+                defeito.responsavel
+            ])
+
+        table_defeitos = Table(data_defeitos)
+        table_defeitos.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.lightyellow),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('ALIGN', (2, 1), (-1, -1), 'LEFT'),
+            ('ALIGN', (1, 1), (1, -1), 'CENTER'),
+            ('ALIGN', (0, 1), (0, -1), 'CENTER'),
+        ]))
+        elements.append(table_defeitos)
+    else:
+        elements.append(Paragraph("Nenhum defeito encontrado nesta inspeção.", styles['normal']))
+
     logging.info('Tabelas e Elementos do PDF criados')
-    doc.build(elements)
+    #doc.build(elements, onFirstPage=add_watermark, onLaterPages=add_watermark) # Adiciona a função de marca d'água ao build
+
+    ## Na chamada do doc.build:
+    doc.build(elements, onFirstPage=lambda c, d: add_image_watermark(c, d, "F:\Projetos\Apps\Inspeçao Diaria Maquinas\logo_fertecnica.jpg"), 
+              onLaterPages=lambda c, d: add_image_watermark(c, d, "F:\Projetos\Apps\Inspeçao Diaria Maquinas\logo_fertecnica.jpg"))
     buffer.seek(0)
     return buffer
+
+def add_image_watermark(canvas, doc, image_path):
+    canvas.saveState()
+    img = Image(image_path, width=200, height=100) # Ajuste o tamanho conforme necessário
+    img.drawOn(canvas, (doc.width - 250), (doc.height - 150)) # Ajuste a posição conforme necessário
+    canvas.restoreState()
 
 def enviar_email_inspecao(destinatario_email, nome_fantasia, pdf_buffer, titulo_email, nome_pdf):
     """Envia um email com o PDF da inspeção em anexo."""

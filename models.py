@@ -1,18 +1,31 @@
 from main import db, bcrypt
 import os
 
-class Empresa(db.Model):
+class Empresas(db.Model):
     id = db.Column(db.String(100), primary_key=True)
-    cnpj = db.Column(db.String(14), nullable=False)
-    razaosocial = db.Column(db.String(100), nullable=False)
-    nomefantasia = db.Column(db.String(100), nullable=False)
+    cnpj = db.Column(db.String(14), unique=True, nullable=False)
+    razao_social = db.Column(db.String(100), nullable=False)
+    nome_fantasia = db.Column(db.String(100), nullable=False)
     email = db.Column(db.String(100), nullable=False)
-    login = db.Column(db.String(80), unique=True, nullable=False)
-    senha_hash = db.Column(db.String(128), nullable=False)
-    senha_salt = db.Column(db.String(29), nullable=False)
     sincronizado = db.Column(db.Boolean, default=False)
     ativo = db.Column(db.Boolean, default=True)
     aprovado = db.Column(db.Boolean, default=False)
+
+    def __repr__(self):
+        return f'<Empresa: {self.razao_social}(CNPJ: {self.cnpj})>'
+
+class Usuarios(db.Model):
+    id = db.Column(db.String(100), primary_key=True)
+    empresaId = db.Column(db.String(100), nullable=False)
+    nome = db.Column(db.String(255), nullable=False)
+    email= db.Column(db.String(255), nullable=False)
+    cpf = db.Column(db.String(14), nullable=False)
+    login = db.Column(db.String(50), unique=True, nullable=False)
+    senha_hash = db.Column(db.String(128), nullable=False)
+    senha_salt = db.Column(db.String(29), nullable=False)
+    perfil = db.Column(db.String(50), nullable=False)
+    ativo = db.Column(db.Boolean, default=True)
+    sincronizado = db.Column(db.Boolean, default=False)
 
     def set_password(self, senha):
         ## Gera um salt aleatorio
@@ -21,11 +34,11 @@ class Empresa(db.Model):
     
     def check_password(self, senha):
         return bcrypt.check_password_hash(self.senha_hash, (senha + self.senha_salt).encode('utf-8'))
-
+    
     def __repr__(self):
-        return f'<Empresa: {self.razaosocial}(CNPJ: {self.cnpj}) | Login: {self.login}>'
+        return f'<Usuario: {self.nome}, Login: {self.login}'
 
-class Maquina(db.Model):
+class Maquinas(db.Model):
     id = db.Column(db.String(100), primary_key=True)
     nome = db.Column(db.String(100), nullable=False)
     modelo = db.Column(db.String(100), nullable=False)
@@ -37,23 +50,10 @@ class Maquina(db.Model):
     def __repr__(self):
         return f'<Maquina: {self.modelo} - {self.numero_serie}>'
 
-class Operador(db.Model):
-    id = db.Column(db.String(100), primary_key=True)
-    nome = db.Column(db.String(100), nullable=False)
-    cpf = db.Column(db.String(11), nullable=False)
-    empresaId = db.Column(db.String(100), nullable=False)
-    sincronizado = db.Column(db.Boolean, default=False)
-    ativo = db.Column(db.Boolean, default=True)
-
-    def __repr__(self):
-        return f'<Operador: {self.nome} (CPF: {self.cpf})'
-
-from main import db
-
 class Inspecao(db.Model):
     id = db.Column(db.String(100), primary_key=True)
     maquinaId = db.Column(db.String(100), nullable=False)
-    operadorId = db.Column(db.String(100), nullable=False)
+    usuarioId = db.Column(db.String(100), nullable=False)
     dataInspecao = db.Column(db.Date, nullable=False)
     horasDeOperacao = db.Column(db.Integer, nullable=False)
     horasEmCarga = db.Column(db.Integer, nullable=False)
@@ -68,6 +68,16 @@ class Inspecao(db.Model):
     temperaturaPontoOrvalho = db.Column(db.Integer, nullable=False)
     dreno = db.Column(db.Boolean)
     limpeza = db.Column(db.Boolean)
+    observacao = db.Column(db.String(255), nullable=False)
+    sincronizado = db.Column(db.Boolean, default=False)
+    ativo = db.Column(db.Boolean, default=True)
+
+    def __repr__(self):
+        return f'<Inspecao: Dia {self.dataInspecao} | Maquina {self.maquinaId} | Usuario {self.usuarioId}>'
+
+class Defeitos(db.Model):
+    id = db.Column(db.String(100), primary_key=True)
+    inspecaoId = db.Column(db.String(100), nullable=False)
     status = db.Column(db.String(255), nullable=False)
     desvioAnomalia = db.Column(db.String(255), nullable=False)
     causaAnomalia = db.Column(db.String(255), nullable=False)
@@ -77,4 +87,4 @@ class Inspecao(db.Model):
     ativo = db.Column(db.Boolean, default=True)
 
     def __repr__(self):
-        return f'<Inspecao: Dia {self.dataInspecao} | Maquina {self.maquinaId} | Operador {self.operadorId}>'
+        return f'<Defeito: {self.status} Desvio: {self.desvioAnomalia} Causa: {self.causaAnomalia} Acao Corretiva: {self.acaoCorretiva} Responsavel: {self.responsavel}'

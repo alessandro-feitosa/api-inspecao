@@ -25,8 +25,8 @@
                     {% for empresa in empresas %}
                     <tr>
                         <td>{{ empresa.cnpj }}</td>
-                        <td>{{ empresa.razaosocial }}</td>
-                        <td>{{ empresa.nomefantasia }}</td>
+                        <td>{{ empresa.razao_social }}</td>
+                        <td>{{ empresa.nome_fantasia }}</td>
                         <td>{{ empresa.email }}</td>
                         <td>
                             <a href="{{ url_for('aprovar_empresa', id=empresa.id) }}">Aprovar</a>

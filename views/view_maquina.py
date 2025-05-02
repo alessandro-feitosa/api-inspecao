@@ -1,7 +1,7 @@
 import logging
 from main import app, db
 from flask import request, jsonify
-from models import Maquina
+from models import Maquinas
 
 # Configurando Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -14,7 +14,7 @@ def criar_maquina():
         logging.info(f'Dados recebidos: {data}')
         ## Validar Numero de Serie da Maquina na base da Fertecnica
 
-        nova_maquina = Maquina(
+        nova_maquina = Maquinas(
             id = data['id'],
             nome = data['nome'],
             modelo = data['modelo'],
@@ -36,14 +36,15 @@ def criar_maquina():
 @app.route('/maquina/<id>', methods=['GET'])
 def consulta_maquina(id):
     logging.info(f'Iniciando consulta da Maquina ID: {id}.')
-    maquina = Maquina.query.get(id)
+    maquina = Maquinas.query.get(id)
     if maquina:
         return jsonify({
             'id': maquina.id,
             'nome': maquina.nome,
             'modelo': maquina.modelo,
             'numero_serie': maquina.numero_serie,
-            'empresaId': maquina.empresaId
+            'empresaId': maquina.empresaId,
+            'ativo': 'ATIVO' if maquina.ativo else 'INATIVO'
         }), 200
     return jsonify({'mensagem':'Maquina não encontrada'}), 404
 
@@ -51,7 +52,7 @@ def consulta_maquina(id):
 @app.route('/maquina/empresa/<id>', methods=['GET'])
 def consulta_maquina_empresa(id):
     logging.info(f'Iniciando consulta da Maquina da Empresa ID: {id}.')
-    maquinas = Maquina.query.filter_by(empresaId=id)
+    maquinas = Maquinas.query.filter_by(empresaId=id)
     resultado = []
     for maquina in maquinas:
         resultado.append({
@@ -67,7 +68,7 @@ def consulta_maquina_empresa(id):
 @app.route('/maquina/<id>', methods=['PUT'])
 def atualizar_maquina(id):
     logging.info(f'Iniciando atualizacao da Maquina ID: {id}.')
-    maquina = Maquina.query.get(id)
+    maquina = Maquinas.query.get(id)
     if maquina:
         data = request.get_json()
         maquina.nome = data.get('nome', maquina.nome)
@@ -82,9 +83,10 @@ def atualizar_maquina(id):
 @app.route('/maquina/<id>', methods=['DELETE'])
 def deletar_maquina(id):
     logging.info(f'Iniciando remocao da Maquina ID: {id}.')
-    maquina = Maquina.query.get(id)
+    maquina = Maquinas.query.get(id)
     if maquina:
-        db.session.delete(maquina)
+        maquina.ativo = False
+        maquina.sincronizado = False
         db.session.commit()
         return jsonify({'mensagem': 'Maquina deletada com sucesso!'}), 200
     
