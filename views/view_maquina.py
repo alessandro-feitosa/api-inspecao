@@ -2,6 +2,7 @@ import logging
 from main import app, db
 from flask import request, jsonify
 from models import Maquinas
+from helpers import validar_api_fertecnica
 
 # Configurando Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -12,7 +13,16 @@ def criar_maquina():
     try:
         data = request.get_json()
         logging.info(f'Dados recebidos: {data}')
+        ## Validar se Numero de Serie já exite no Banco de Dados
+        numeroDeSerie = data['numero_serie']
+        if Maquinas.query.filter_by(numero_serie=numeroDeSerie).first():
+            return jsonify({'mensagem':'Numero de Serie da Maquina ja cadastrado na Base.'}), 400
+
         ## Validar Numero de Serie da Maquina na base da Fertecnica
+         ## Validar CNPJ na base da Fertecnica
+        numero_serie = data['numero_serie']
+        if(validar_api_fertecnica("", numero_serie) != True):
+            return jsonify({'mensagem':'Numero de Serie não cadastrado na Fertecnica.'}), 400
 
         nova_maquina = Maquinas(
             id = data['id'],
@@ -27,10 +37,14 @@ def criar_maquina():
         logging.info(f'Maquina criada com sucesso. ID: {nova_maquina.id}')
         return jsonify({'mensagem':'Maquina criada com sucesso!'}), 201
     
+    except KeyError as e:
+        logging.error(f'Chave de validaçao ausente ou incorreta: {e}')
+        db.session.rollback()
+        return jsonify({'mensagem': f'Erro: Campo obrigatório ausente: {e}'}), 400
     except Exception as e:
         logging.error(f'Erro ao criar maquina: {e}')
         db.session.rollback()
-        return jsonify({'mensagem':f'Erro ao criar maquina: {e}'}), 500
+        return jsonify({'mensagem': f'Erro ao criar maquina: {e}'}), 400
 
 
 @app.route('/maquina/<id>', methods=['GET'])

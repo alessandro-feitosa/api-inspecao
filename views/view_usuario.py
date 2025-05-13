@@ -31,7 +31,7 @@ def autenticarUsuario():
                     'cpf': usuario.cpf,
                     'email': usuario.email,
                     'login': usuario.login,
-                    'senha': usuario.senha_hash
+                    'perfil': usuario.perfil
                 }), 200
         else:
             return jsonify({'mensagem':'Empresa não encontrada'}), 404

@@ -1,9 +1,10 @@
 import logging
-from main import app, db, token_auth, mail
+from main import app, db, token_auth
+from config import EMAIL_ADMIN, NOME_ADMIN
 from flask import flash, request, jsonify, render_template, redirect, url_for
-from flask_httpauth import HTTPTokenAuth
 from models import Empresas, Usuarios
-from flask_mail import Message
+from helpers import validar_api_fertecnica 
+from emailHelpers import enviar_email_cadastro_aprovado, enviar_email_para_aprovacao
 
 # Configurando Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -16,17 +17,20 @@ def criar_empresa():
         data = request.get_json()
         logging.info(f'Dados recebidos: {data}')
         ## Validar CNPJ na base da Fertecnica
+        cnpj = data['cnpj']
+        if(validar_api_fertecnica(cnpj, "") != True):
+            return jsonify({'mensagem':'CNPJ não cadastrado na Fertecnica.'}), 400
 
         login = data['login']
         senha = data['senha']
 
         ## Validar campos de Login e Senha
         if not login or not senha:
-            return jsonify({'mensagem':'Login e Senha são obrigatorios'})
+            return jsonify({'mensagem':'Login e Senha são obrigatorios'}), 400
         
         ## Validar se já existe algum Usuario com esse login cadastrado
         if Usuarios.query.filter_by(login=login).first():
-            return jsonify({'mensagem':'Login ja existe!'})
+            return jsonify({'mensagem':'Login ja existe!'}), 400
 
         nova_empresa = Empresas(
             id = data['id'],
@@ -59,6 +63,14 @@ def criar_empresa():
         db.session.commit()
         logging.info(f'Empresa criada com sucesso. ID: {nova_empresa.id}')
         logging.info(f'Usuario criado com sucesso. Login: {novo_usuario.login}')
+
+        ## Enviar email para o Gestor para Aprovação de Nova Empresa
+        emailEnviado = enviar_email_para_aprovacao(EMAIL_ADMIN, NOME_ADMIN, nova_empresa)
+        if emailEnviado:
+            logging.info('Email para aprovação de empresa nova enviado com sucesso.')
+        else:
+            logging.error('Erro ao enviar email para aprovação de empresa nova.')
+
         return jsonify({'mensagem':'Empresa criada com sucesso!'}), 201
     
     except Exception as e:
@@ -123,6 +135,38 @@ def deletar_empresa(id):
     
     return jsonify({'mensagem': 'Empresa não encontrada!'}), 404
 
+@app.route('/empresa/sync', methods=['POST'])
+@token_auth.login_required
+def cadastrar_empresa_sync():
+    logging.info('Iniciando a criação de uma nova empresa.')
+    try:
+        data = request.get_json()
+        logging.info(f'Dados recebidos: {data}')
+        ## Validar CNPJ na base da Fertecnica
+
+        nova_empresa = Empresas(
+            id = data['id'],
+            cnpj = data['cnpj'],
+            razao_social = data['razaosocial'],
+            nome_fantasia = data['nomefantasia'],
+            email = data['email'],
+            sincronizado = False,
+            ativo = True,
+            aprovado = False
+        )
+        logging.info(f'Dados da Nova Empresa: {nova_empresa}')
+                
+        db.session.add(nova_empresa)
+        db.session.commit()
+        
+        logging.info(f'Empresa criada com sucesso. ID: {nova_empresa.id}')
+        return jsonify({'mensagem':'Empresa criada com sucesso!'}), 201
+    
+    except Exception as e:
+        logging.error(f'Erro ao criar empresa: {e}')
+        db.session.rollback()
+        return jsonify({'mensagem':f'Erro ao criar empresa: {e}'}), 500
+
 @app.route('/empresa/pendentes')
 def listar_empresas_pendentes():
     listaEmpresasPendentes = Empresas.query.filter_by(aprovado=False).all()
@@ -147,29 +191,3 @@ def aprovar_empresa(id):
         flash(f'Erro ao enviar email de confirmação para: {empresa.email}', 'error')
 
     return redirect( url_for('listar_empresas_pendentes') )
-
-def enviar_email_cadastro_aprovado(destinatario_email, nome_fantasia):
-    """Envia um email informando que o cadastro da empresa foi aprovado."""
-    try:
-        msg = Message(
-            subject='Cadastro Aprovado - Fertecnica',
-            recipients=[destinatario_email]
-        )
-        msg.body = f"""
-Prezada(o) {nome_fantasia},
-
-Informamos que o cadastro da sua empresa foi aprovado pela Fertecnica com sucesso!
-
-Agora, você já pode utilizar o App para realizar as inspeções das suas máquinas.
-
-Agradecemos o seu cadastro.
-
-Atenciosamente,
-Equipe Fertecnica
-"""
-        mail.send(msg)
-        logging.info(f'Email de aprovação enviado para: {destinatario_email}')
-        return True
-    except Exception as e:
-        logging.error(f'Erro ao enviar email de aprovação para {destinatario_email}: {e}')
-        return False
