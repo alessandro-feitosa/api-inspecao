@@ -30,6 +30,7 @@
                         <td>{{ empresa.email }}</td>
                         <td>
                             <a href="{{ url_for('aprovar_empresa', id=empresa.id) }}">Aprovar</a>
+                            <a href="{{ url_for('reprovar_empresa', id=empresa.id) }}">Reprovar</a>
                         </td>
                     </tr>
                     {% endfor %}

@@ -52,3 +52,27 @@ Equipe Fertecnica
     except Exception as e:
         logging.error(f'Erro ao enviar email de aprovação para {destinatario_email}: {e}')
         return False
+
+def enviar_email_cadastro_reprovado(destinatario_email, nome_fantasia):
+    """Envia um email informando que o cadastro da empresa foi reprovado."""
+    try:
+        msg = Message(
+            subject='Cadastro Não Aprovado - Fertecnica',
+            recipients=[destinatario_email]
+        )
+        msg.body = f"""
+Prezada(o) {nome_fantasia},
+
+Informamos que o cadastro da sua empresa não foi aprovado pela Fertecnica!
+
+Caso esteja com dúvida, entre em contato com a Fertecnica para maiores esclarecimentos.
+
+Atenciosamente,
+Equipe Fertecnica
+"""
+        mail.send(msg)
+        logging.info(f'Email de reprovaçao enviado para: {destinatario_email}')
+        return True
+    except Exception as e:
+        logging.error(f'Erro ao enviar email de reprovaçao para {destinatario_email}: {e}')
+        return False

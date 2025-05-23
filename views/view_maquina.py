@@ -14,15 +14,13 @@ def criar_maquina():
         data = request.get_json()
         logging.info(f'Dados recebidos: {data}')
         ## Validar se Numero de Serie já exite no Banco de Dados
-        numeroDeSerie = data['numero_serie']
-        if Maquinas.query.filter_by(numero_serie=numeroDeSerie).first():
+        numero_serie = data['numero_serie']
+        if Maquinas.query.filter_by(numero_serie=numero_serie).first():
             return jsonify({'mensagem':'Numero de Serie da Maquina ja cadastrado na Base.'}), 400
 
         ## Validar Numero de Serie da Maquina na base da Fertecnica
-         ## Validar CNPJ na base da Fertecnica
-        numero_serie = data['numero_serie']
-        if(validar_api_fertecnica("", numero_serie) != True):
-            return jsonify({'mensagem':'Numero de Serie não cadastrado na Fertecnica.'}), 400
+        ## if(validar_api_fertecnica("", numero_serie) != True):
+        ##     return jsonify({'mensagem':'Numero de Serie não cadastrado na Fertecnica.'}), 400
 
         nova_maquina = Maquinas(
             id = data['id'],

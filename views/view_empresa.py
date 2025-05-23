@@ -4,7 +4,7 @@ from config import EMAIL_ADMIN, NOME_ADMIN
 from flask import flash, request, jsonify, render_template, redirect, url_for
 from models import Empresas, Usuarios
 from helpers import validar_api_fertecnica 
-from emailHelpers import enviar_email_cadastro_aprovado, enviar_email_para_aprovacao
+from emailHelpers import enviar_email_cadastro_aprovado, enviar_email_para_aprovacao, enviar_email_cadastro_reprovado
 
 # Configurando Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -18,8 +18,8 @@ def criar_empresa():
         logging.info(f'Dados recebidos: {data}')
         ## Validar CNPJ na base da Fertecnica
         cnpj = data['cnpj']
-        if(validar_api_fertecnica(cnpj, "") != True):
-            return jsonify({'mensagem':'CNPJ não cadastrado na Fertecnica.'}), 400
+        ## if(validar_api_fertecnica(cnpj, "") != True):
+        ##    return jsonify({'mensagem':'CNPJ não cadastrado na Fertecnica.'}), 400
 
         login = data['login']
         senha = data['senha']
@@ -87,24 +87,38 @@ def listar_empresas():
         resultado.append({
             'id': empresa.id,
             'cnpj': empresa.cnpj,
-            'razao_social': empresa.razao_social,
-            'nome_fantasia': empresa.nome_fantasia,
+            'razaosocial': empresa.razao_social,
+            'nomefantasia': empresa.nome_fantasia,
             'email': empresa.email,
             'ativo': 'ATIVO' if empresa.ativo else 'INATIVO',
             'aprovado': 'OK' if empresa.aprovado else 'PENDENTE'
         })
     return jsonify(resultado), 200
 
-@app.route('/empresa/<id>', methods=['GET'])
+@app.route('/empresa/<identifier>', methods=['GET'])
 @token_auth.login_required
-def consulta_empresa(id):
-    empresa = Empresas.query.get(id)
+def consulta_empresa(identifier):
+    logging.info(f"Iniciando consulta de empresa pelo identificador: {identifier}.")
+    empresa = None
+
+    ### Verifica se o identificador é um ID ou CNPJ ###
+    ## cnpj_limpo = identifier.replace('.', '').replace('/', '').replace('-', '')
+
+    if len(identifier) == 14 and identifier.isdigit():
+        logging.info("Identificador é um CNPJ")
+        empresa = Empresas.query.filter_by(cnpj=identifier).first()
+    else:
+        logging.info("Identificador é um ID")
+        empresa = Empresas.query.get(identifier)
+
     if empresa:
+        logging.info("Empresa encontrada")
         return jsonify({
             'id': empresa.id,
             'cnpj': empresa.cnpj,
             'razaosocial': empresa.razao_social,
             'nomefantasia': empresa.nome_fantasia,
+            'email': empresa.email,
             'ativo': 'ATIVO' if empresa.ativo else 'INATIVO'
         }), 200
     return jsonify({'mensagem':'Empresa não encontrada'}), 404
@@ -169,7 +183,7 @@ def cadastrar_empresa_sync():
 
 @app.route('/empresa/pendentes')
 def listar_empresas_pendentes():
-    listaEmpresasPendentes = Empresas.query.filter_by(aprovado=False).all()
+    listaEmpresasPendentes = Empresas.query.filter_by(aprovado=False, ativo=True).all()
     return render_template('aprovar_empresa.html', titulo='Aprovar Empresas Pendentes', empresas=listaEmpresasPendentes)
 
 @app.route('/empresa/aprovar/<id>')
@@ -180,11 +194,30 @@ def aprovar_empresa(id):
 
     db.session.add(empresa)
     db.session.commit()
-    flash('Empresa aprovada com sucesso!')
     logging.info(f'Empresa Aprovada!')
 
     # Enviar email de aprovação
     enviou = enviar_email_cadastro_aprovado(empresa.email, empresa.nome_fantasia)
+    if enviou:
+        flash(f'Um email de confirmação foi enviado para: {empresa.email}')
+    else:
+        flash(f'Erro ao enviar email de confirmação para: {empresa.email}', 'error')
+
+    return redirect( url_for('listar_empresas_pendentes') )
+
+@app.route('/empresa/reprovar/<id>')
+def reprovar_empresa(id):
+    empresa = Empresas.query.get(id)
+    logging.info(f'Empresa encontrada. ID: {empresa.id} | Nome: {empresa.nome_fantasia}')
+    empresa.aprovado = False
+    empresa.ativo = False
+    
+    db.session.add(empresa)
+    db.session.commit()
+    logging.info(f'Empresa Reprovada!')
+
+    # Enviar email de Reprovacao
+    enviou = enviar_email_cadastro_reprovado(empresa.email, empresa.nome_fantasia)
     if enviou:
         flash(f'Um email de confirmação foi enviado para: {empresa.email}')
     else:
